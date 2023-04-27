@@ -12,6 +12,6 @@ func migration(db *gorm.DB) {
 }
 
 func getModels() []interface{} {
-	models := []interface{}{&m.Auth{}}
+	models := []interface{}{&m.User{}}
 	return models
 }
