@@ -2,13 +2,12 @@ package service
 
 import (
 	"context"
+	"login/config"
+	"login/models"
 	pb "login/protos"
 	"login/repositories"
 	"login/utils"
-	"os"
-	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -17,35 +16,67 @@ type Server struct {
 	pb.UnimplementedAuthServiceServer
 }
 
-var exp = time.Now().Add(time.Hour * 72).Unix()
-
 func (s *Server) SignIn(ctx context.Context, req *pb.Request) (*pb.Response, error) {
-	jwtSecret := os.Getenv("JWT_SECRET")
-
-	user, err := repositories.FindUserByEmail(req.Email)
-
+	cfg, err := config.LoadConfig(".")
 	if err != nil {
-		return nil, err
+		return nil, status.Error(codes.Internal, "Failed to load configuration.")
 	}
 
-	err = utils.CheckPassword(req.Password, user.Password)
+	user, err := repositories.GetUserByEmail(req.Email)
 
 	if err != nil {
 		return nil, status.Error(codes.PermissionDenied, "Invalid username or password.")
 	}
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"username": req.Username,
-		"exp":      exp,
-	})
-
-	signedToken, err := token.SignedString([]byte(jwtSecret))
+	if err := utils.ComparePassword(req.Password, user.Password); err != nil {
+		return nil, status.Error(codes.PermissionDenied, "Invalid username or password.")
+	}
+	parseAccessTokenKey, _ := utils.ParsePrivateKey(cfg.AccessTokenPrivateKey)
+	accessToken, err := utils.CreateToken(cfg.AccessTokenExpiresIn, req.Email, parseAccessTokenKey)
 	if err != nil {
-		return nil, err
+		return nil, status.Error(codes.Internal, "Failed to create access token.")
+	}
+	parseRefreshAccessTokenKey, _ := utils.ParsePrivateKey(cfg.AccessTokenPrivateKey)
+	refreshToken, err := utils.CreateToken(cfg.RefreshTokenExpiresIn, req.Email, parseRefreshAccessTokenKey)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "Failed to create refresh token.")
 	}
 
 	return &pb.Response{
-		AccessToken:  signedToken,
-		RefreshToken: "Login successful",
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+	}, nil
+}
+
+func (s *Server) SignUp(ctx context.Context, req *pb.Request) (*pb.Response, error) {
+	cfg, err := config.LoadConfig(".")
+
+	if err != nil {
+		return nil, status.Error(codes.Internal, "Failed to load configuration.")
+	}
+
+	hashedPassword := utils.HashPassword(req.Password)
+	user := models.User{Email: req.Email, Password: hashedPassword}
+
+	if _, err := repositories.CreateUser(&user); err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to create user: %v", err)
+	}
+
+	parseAccessTokenKey, _ := utils.ParsePrivateKey(cfg.AccessTokenPrivateKey)
+	accessToken, err := utils.CreateToken(cfg.AccessTokenExpiresIn, user.Email, parseAccessTokenKey)
+	if err != nil {
+
+		return nil, status.Error(codes.Internal, "Failed to create access token.")
+	}
+
+	parseRefreshAccessTokenKey, _ := utils.ParsePrivateKey(cfg.RefreshTokenPrivateKey)
+	refreshToken, err := utils.CreateToken(cfg.RefreshTokenExpiresIn, user.Email, parseRefreshAccessTokenKey)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "Failed to create refresh token.")
+	}
+
+	return &pb.Response{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
 	}, nil
 }

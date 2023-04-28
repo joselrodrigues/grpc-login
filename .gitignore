@@ -151,3 +151,7 @@ go.work
 
 # Enviroment files
 .env
+
+# RSA files and base64
+*.base64
+*.pem

@@ -9,11 +9,11 @@ import (
 	"gorm.io/gorm"
 )
 
-func FindUserByEmail(email string) (*models.User, error) {
+func GetUserByEmail(email string) (*models.User, error) {
 	db, _ := db.Setup()
 
-	user := models.User{Email: email}
-	result := db.First(&user)
+	user := &models.User{}
+	result := db.Where("email = ?", email).First(user)
 
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
@@ -21,5 +21,19 @@ func FindUserByEmail(email string) (*models.User, error) {
 		}
 		return nil, fmt.Errorf("database error: %v", result.Error)
 	}
-	return &user, nil
+	return user, nil
+}
+
+func CreateUser(user *models.User) (*models.User, error) {
+	db, err := db.Setup()
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to the database: %w", err)
+	}
+
+	if result := db.Create(&user); result.Error != nil {
+		return nil, fmt.Errorf("failed to create user: %w", result.Error)
+	}
+
+	return user, nil
 }

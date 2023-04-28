@@ -2,23 +2,50 @@ package db
 
 import (
 	"fmt"
-	"os"
+	"login/config"
+	"sync"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
+var (
+	dbInstance *gorm.DB
+	once       sync.Once
+	setupErr   error
+)
+
 func Setup() (*gorm.DB, error) {
-	user := os.Getenv("POSTGRES_USER")
-	password := os.Getenv("POSTGRES_PASSWORD")
-	port := os.Getenv("POSTGRES_PORT")
-	dbname := os.Getenv("POSTGRES_DB")
-	host := os.Getenv("POSTGRES_HOST")
+	once.Do(func() {
+		cfg, err := config.LoadConfig(".")
 
-	dsn := "host=%s user=%s password=%s dbname=%s port=%s sslmode=disable"
-	dsn = fmt.Sprintf(dsn, host, user, password, dbname, port)
+		if err != nil {
+			setupErr = err
+			return
+		}
 
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+		dsn := buildDSN(cfg)
 
-	return db, err
+		dbInstance, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
+		if err != nil {
+			dbInstance = nil
+			setupErr = err
+			return
+		}
+	})
+
+	if setupErr != nil {
+		return nil, setupErr
+	}
+
+	if dbInstance == nil {
+		return nil, fmt.Errorf("failed to connect to the database")
+	}
+
+	return dbInstance, nil
+}
+
+func buildDSN(cfg config.Config) string {
+	dsn := "host=%s user=%s password=%s dbname=%s port=%d sslmode=disable"
+	return fmt.Sprintf(dsn, cfg.PostgresHost, cfg.PostgresUser, cfg.PostgresPassword, cfg.PostgresDB, cfg.PostgresPort)
 }
