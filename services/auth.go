@@ -8,6 +8,7 @@ import (
 	"login/repositories"
 	"login/utils"
 
+	"github.com/golang-jwt/jwt/v5"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -78,5 +79,30 @@ func (s *Server) SignUp(ctx context.Context, req *pb.Request) (*pb.Response, err
 	return &pb.Response{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
+	}, nil
+}
+
+func (s *Server) ValidateToken(ctx context.Context, req *pb.ValidateTokenRequest) (*pb.ValidateTokenResponse, error) {
+	cfg, err := config.LoadConfig(".")
+
+	if err != nil {
+		return nil, status.Error(codes.Internal, "Failed to load configuration.")
+	}
+	rawClaims, err := utils.ValidateToken(req.Token, cfg.AccessTokenPublicKey)
+	if err != nil {
+		return nil, status.Error(codes.Unauthenticated, "Invalid token")
+	}
+
+	claims := rawClaims.(jwt.MapClaims)
+
+	pbClaims := &pb.JWTClaims{
+		Sub: claims["sub"].(string),
+		Exp: int64(claims["exp"].(float64)),
+		Iat: int64(claims["iat"].(float64)),
+		Nbf: int64(claims["nbf"].(float64)),
+	}
+
+	return &pb.ValidateTokenResponse{
+		Claims: pbClaims,
 	}, nil
 }
