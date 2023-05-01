@@ -23,7 +23,7 @@ func (s *Server) SignIn(ctx context.Context, req *pb.Request) (*pb.Response, err
 		return nil, status.Error(codes.Internal, "Failed to load configuration.")
 	}
 
-	user, err := repositories.GetUserByEmail(req.Email)
+	user, err := repositories.GetUserByEmail(ctx, req.Email)
 
 	if err != nil {
 		return nil, status.Error(codes.PermissionDenied, "Invalid username or password.")
@@ -33,14 +33,21 @@ func (s *Server) SignIn(ctx context.Context, req *pb.Request) (*pb.Response, err
 		return nil, status.Error(codes.PermissionDenied, "Invalid username or password.")
 	}
 	parseAccessTokenKey, _ := utils.ParsePrivateKey(cfg.AccessTokenPrivateKey)
-	accessToken, err := utils.CreateToken(cfg.AccessTokenExpiresIn, req.Email, parseAccessTokenKey)
+	accessToken, err := utils.CreateToken(cfg.AccessTokenExpiresIn, user.ID, parseAccessTokenKey)
 	if err != nil {
 		return nil, status.Error(codes.Internal, "Failed to create access token.")
 	}
 	parseRefreshAccessTokenKey, _ := utils.ParsePrivateKey(cfg.AccessTokenPrivateKey)
-	refreshToken, err := utils.CreateToken(cfg.RefreshTokenExpiresIn, req.Email, parseRefreshAccessTokenKey)
+	refreshToken, err := utils.CreateToken(cfg.RefreshTokenExpiresIn, user.ID, parseRefreshAccessTokenKey)
 	if err != nil {
 		return nil, status.Error(codes.Internal, "Failed to create refresh token.")
+	}
+
+	userData := &utils.User{ID: user.ID, Email: user.Email}
+	err = userData.StoreRefreshToken(ctx, cfg.RefreshTokenExpiresIn, refreshToken)
+
+	if err != nil {
+		return nil, status.Error(codes.Internal, "Failed to store refresh token.")
 	}
 
 	return &pb.Response{
@@ -64,16 +71,23 @@ func (s *Server) SignUp(ctx context.Context, req *pb.Request) (*pb.Response, err
 	}
 
 	parseAccessTokenKey, _ := utils.ParsePrivateKey(cfg.AccessTokenPrivateKey)
-	accessToken, err := utils.CreateToken(cfg.AccessTokenExpiresIn, user.Email, parseAccessTokenKey)
+	accessToken, err := utils.CreateToken(cfg.AccessTokenExpiresIn, user.ID, parseAccessTokenKey)
 	if err != nil {
 
 		return nil, status.Error(codes.Internal, "Failed to create access token.")
 	}
 
 	parseRefreshAccessTokenKey, _ := utils.ParsePrivateKey(cfg.RefreshTokenPrivateKey)
-	refreshToken, err := utils.CreateToken(cfg.RefreshTokenExpiresIn, user.Email, parseRefreshAccessTokenKey)
+	refreshToken, err := utils.CreateToken(cfg.RefreshTokenExpiresIn, user.ID, parseRefreshAccessTokenKey)
 	if err != nil {
 		return nil, status.Error(codes.Internal, "Failed to create refresh token.")
+	}
+
+	userData := &utils.User{ID: user.ID, Email: user.Email}
+	err = userData.StoreRefreshToken(ctx, cfg.RefreshTokenExpiresIn, refreshToken)
+
+	if err != nil {
+		return nil, status.Error(codes.Internal, "Failed to store refresh token.")
 	}
 
 	return &pb.Response{

@@ -1,6 +1,7 @@
 package db
 
 import (
+	"errors"
 	"fmt"
 	"login/config"
 	"sync"
@@ -12,37 +13,29 @@ import (
 var (
 	dbInstance *gorm.DB
 	once       sync.Once
-	setupErr   error
 )
 
 func Setup() (*gorm.DB, error) {
-	once.Do(func() {
-		cfg, err := config.LoadConfig(".")
+	var err error
 
-		if err != nil {
-			setupErr = err
+	once.Do(func() {
+		var innerErr error
+
+		cfg, innerErr := config.LoadConfig(".")
+		if innerErr != nil {
+			err = errors.New("failed to load configuration")
 			return
 		}
-
 		dsn := buildDSN(cfg)
 
-		dbInstance, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
-		if err != nil {
-			dbInstance = nil
-			setupErr = err
+		dbInstance, innerErr = gorm.Open(postgres.Open(dsn), &gorm.Config{})
+		if innerErr != nil {
+			err = errors.New("failed to connect to the database")
 			return
 		}
 	})
 
-	if setupErr != nil {
-		return nil, setupErr
-	}
-
-	if dbInstance == nil {
-		return nil, fmt.Errorf("failed to connect to the database")
-	}
-
-	return dbInstance, nil
+	return dbInstance, err
 }
 
 func buildDSN(cfg config.Config) string {

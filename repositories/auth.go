@@ -1,6 +1,7 @@
 package repositories
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"login/db"
@@ -9,11 +10,11 @@ import (
 	"gorm.io/gorm"
 )
 
-func GetUserByEmail(email string) (*models.User, error) {
+func GetUserByEmail(ctx context.Context, email string) (*models.User, error) {
 	db, _ := db.Setup()
 
 	user := &models.User{}
-	result := db.Where("email = ?", email).First(user)
+	result := db.WithContext(ctx).Where("email = ?", email).First(user)
 
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {

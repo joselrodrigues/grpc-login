@@ -1,14 +1,22 @@
 package utils
 
 import (
+	"context"
 	"crypto/rsa"
 	"encoding/base64"
 	"fmt"
+	"login/db"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
+
+type User struct {
+	ID    uuid.UUID
+	Email string
+}
 
 func ComparePassword(password, hashedPassword string) error {
 	err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
@@ -91,4 +99,23 @@ func ValidateToken(token string, publicKey string) (interface{}, error) {
 	}
 
 	return claims, nil
+}
+
+func (u *User) StoreRefreshToken(ctx context.Context, ttl time.Duration, refreshToken string) error {
+	refreshTokenKey := fmt.Sprintf("user:%s:refresh_token:%s", u.ID.String(), refreshToken)
+
+	rdb, err := db.Redis(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to connect to Redis: %w", err)
+	}
+
+	pipe := rdb.TxPipeline()
+
+	pipe.Set(ctx, refreshTokenKey, refreshToken, ttl)
+
+	if _, err := pipe.Exec(ctx); err != nil {
+		return fmt.Errorf("failed to store refresh token: %w", err)
+	}
+
+	return nil
 }
