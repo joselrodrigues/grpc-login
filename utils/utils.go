@@ -119,3 +119,23 @@ func (u *User) StoreRefreshToken(ctx context.Context, ttl time.Duration, refresh
 
 	return nil
 }
+
+func CheckIfRefreshTokenBlocked(ctx context.Context, refreshToken string) error {
+	query := fmt.Sprintf("user:*:refresh_token:%s", refreshToken)
+
+	rdb, err := db.Redis(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to connect to Redis: %w", err)
+	}
+
+	keys, err := rdb.Keys(ctx, query).Result()
+	if err != nil {
+		return err
+	}
+
+	if len(keys) == 0 {
+		return fmt.Errorf("refresh token is blocked")
+	}
+
+	return nil
+}

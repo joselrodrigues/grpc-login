@@ -9,6 +9,7 @@ import (
 	"login/utils"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -37,7 +38,7 @@ func (s *Server) SignIn(ctx context.Context, req *pb.Request) (*pb.Response, err
 	if err != nil {
 		return nil, status.Error(codes.Internal, "Failed to create access token.")
 	}
-	parseRefreshAccessTokenKey, _ := utils.ParsePrivateKey(cfg.AccessTokenPrivateKey)
+	parseRefreshAccessTokenKey, _ := utils.ParsePrivateKey(cfg.RefreshTokenPrivateKey)
 	refreshToken, err := utils.CreateToken(cfg.RefreshTokenExpiresIn, user.ID, parseRefreshAccessTokenKey)
 	if err != nil {
 		return nil, status.Error(codes.Internal, "Failed to create refresh token.")
@@ -119,4 +120,45 @@ func (s *Server) ValidateToken(ctx context.Context, req *pb.ValidateTokenRequest
 	return &pb.ValidateTokenResponse{
 		Claims: pbClaims,
 	}, nil
+}
+
+func (s *Server) RefreshToken(ctx context.Context, req *pb.RefreshTokenRequest) (*pb.RefreshTokenResponse, error) {
+	cfg, err := config.LoadConfig(".")
+
+	if err != nil {
+		return nil, status.Error(codes.Internal, "Failed to load configuration.")
+	}
+
+	rawClaims, err := utils.ValidateToken(req.RefreshToken, cfg.RefreshTokenPublicKey)
+
+	if err != nil {
+		return nil, status.Error(codes.Unauthenticated, "Invalid token")
+	}
+
+	err = utils.CheckIfRefreshTokenBlocked(ctx, req.RefreshToken)
+
+	if err != nil {
+		return nil, status.Error(codes.Unauthenticated, "Token is bloked")
+	}
+
+	claims := rawClaims.(jwt.MapClaims)
+	userID := claims["sub"].(string)
+
+	user, err := repositories.GetUserById(ctx, uuid.MustParse(userID))
+
+	if err != nil {
+		return nil, status.Error(codes.Unauthenticated, "Invalid user")
+	}
+
+	parseAccessTokenKey, _ := utils.ParsePrivateKey(cfg.AccessTokenPrivateKey)
+	accessToken, err := utils.CreateToken(cfg.AccessTokenExpiresIn, user.ID, parseAccessTokenKey)
+
+	if err != nil {
+		return nil, status.Error(codes.Internal, "Failed to create access token.")
+	}
+
+	return &pb.RefreshTokenResponse{
+		AccessToken: accessToken,
+	}, nil
+
 }

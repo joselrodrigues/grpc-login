@@ -7,6 +7,7 @@ import (
 	"login/db"
 	"login/models"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -15,6 +16,21 @@ func GetUserByEmail(ctx context.Context, email string) (*models.User, error) {
 
 	user := &models.User{}
 	result := db.WithContext(ctx).Where("email = ?", email).First(user)
+
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("user not found: %v", result.Error)
+		}
+		return nil, fmt.Errorf("database error: %v", result.Error)
+	}
+	return user, nil
+}
+
+func GetUserById(ctx context.Context, userID uuid.UUID) (*models.User, error) {
+	db, _ := db.Setup()
+
+	user := &models.User{}
+	result := db.WithContext(ctx).Where("id = ?", userID).First(user)
 
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
