@@ -138,7 +138,7 @@ func (s *Server) RefreshToken(ctx context.Context, req *pb.RefreshTokenRequest) 
 	err = utils.CheckIfRefreshTokenBlocked(ctx, req.RefreshToken)
 
 	if err != nil {
-		return nil, status.Error(codes.Unauthenticated, "Token is bloked")
+		return nil, status.Error(codes.Unauthenticated, "Token is blocked")
 	}
 
 	claims := rawClaims.(jwt.MapClaims)
