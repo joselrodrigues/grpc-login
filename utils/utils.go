@@ -139,3 +139,30 @@ func CheckIfRefreshTokenBlocked(ctx context.Context, refreshToken string) error 
 
 	return nil
 }
+
+func DeleteRedisKey(ctx context.Context) error {
+	rdb, err := db.Redis(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to connect to Redis: %w", err)
+	}
+
+	keys, err := rdb.Keys(ctx, pattern).Result()
+	if err != nil {
+		return fmt.Errorf("failed to retrieve keys: %w", err)
+	}
+
+	if len(keys) == 0 {
+		return fmt.Errorf("no keys found for token")
+	}
+
+	result, err := rdb.Del(ctx, keys...).Result()
+	if err != nil {
+		return fmt.Errorf("failed to delete keys: %w", err)
+	}
+
+	if result == 0 {
+		return fmt.Errorf("no keys were deleted")
+	}
+
+	return nil
+}

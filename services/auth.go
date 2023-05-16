@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"login/config"
 	"login/models"
 	pb "login/protos"
@@ -161,4 +162,43 @@ func (s *Server) RefreshToken(ctx context.Context, req *pb.RefreshTokenRequest) 
 		AccessToken: accessToken,
 	}, nil
 
+}
+
+func (s *Server) SignOut(ctx context.Context, req *pb.DeleteRefreshTokenRequest) (*pb.DeleteRefreshTokenResponse, error) {
+	var pattern string
+
+	cfg, err := config.LoadConfig(".")
+
+	if err != nil {
+		return nil, status.Error(codes.Internal, "Failed to load configuration.")
+	}
+
+	rawClaims, err := utils.ValidateToken(req.RefreshToken, cfg.RefreshTokenPublicKey)
+
+	if err != nil {
+		return nil, status.Error(codes.Unauthenticated, "Invalid token")
+	}
+
+	err = utils.CheckIfRefreshTokenBlocked(ctx, req.RefreshToken)
+
+	if err != nil {
+		return nil, status.Error(codes.Unauthenticated, "Token is blocked")
+	}
+
+	claims := rawClaims.(jwt.MapClaims)
+	userID := claims["sub"].(string)
+
+	user, err := repositories.GetUserById(ctx, uuid.MustParse(userID))
+
+	if err != nil {
+		return nil, status.Error(codes.Unauthenticated, "Invalid user")
+	}
+
+	if len(req.SessionId) > 0 {
+		pattern = fmt.Sprintf("user:%s:refresh_token:*:sesion_id:%s", user.ID, req.SessionId)
+	} else {
+		pattern = fmt.Sprintf("user:*:refresh_token:%s:sesion_id:*", req.RefreshToken)
+	}
+
+	return &pb.DeleteRefreshTokenResponse{}, nil
 }
