@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"login/config"
 	"login/db"
 	logger "login/log"
 	pb "login/protos"
@@ -22,7 +23,14 @@ func main() {
 
 	s := grpc.NewServer()
 
-	pb.RegisterAuthServiceServer(s, &service.Server{})
+	cfg, err := config.LoadConfig(".")
+	if err != nil {
+		log.Fatalf("failed to load configuration: %v", err)
+	}
+
+	serv := &service.Server{Cfg: cfg}
+
+	pb.RegisterAuthServiceServer(s, serv)
 	log.Println("gRPC server listening on port 50051")
 	if err := s.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %v", err)

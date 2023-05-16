@@ -17,96 +17,73 @@ import (
 
 type Server struct {
 	pb.UnimplementedAuthServiceServer
+	Cfg config.Config
 }
 
 func (s *Server) SignIn(ctx context.Context, req *pb.Request) (*pb.Response, error) {
-	cfg, err := config.LoadConfig(".")
-	if err != nil {
-		return nil, status.Error(codes.Internal, "Failed to load configuration.")
-	}
 
 	user, err := repositories.GetUserByEmail(ctx, req.Email)
 
 	if err != nil {
-		return nil, status.Error(codes.PermissionDenied, "Invalid username or password.")
+		return nil, status.Error(codes.PermissionDenied, "invalid username or password")
 	}
 
 	if err := utils.ComparePassword(req.Password, user.Password); err != nil {
-		return nil, status.Error(codes.PermissionDenied, "Invalid username or password.")
+		return nil, status.Error(codes.PermissionDenied, "invalid username or password")
 	}
-	parseAccessTokenKey, _ := utils.ParsePrivateKey(cfg.AccessTokenPrivateKey)
-	accessToken, err := utils.CreateToken(cfg.AccessTokenExpiresIn, user.ID, parseAccessTokenKey)
+
+	token, err := utils.CreateTokens(s.Cfg, user.ID)
+
 	if err != nil {
-		return nil, status.Error(codes.Internal, "Failed to create access token.")
-	}
-	parseRefreshAccessTokenKey, _ := utils.ParsePrivateKey(cfg.RefreshTokenPrivateKey)
-	refreshToken, err := utils.CreateToken(cfg.RefreshTokenExpiresIn, user.ID, parseRefreshAccessTokenKey)
-	if err != nil {
-		return nil, status.Error(codes.Internal, "Failed to create refresh token.")
+		return nil, status.Error(codes.Internal, fmt.Sprintf("%s", err))
 	}
 
 	userData := &utils.User{ID: user.ID, Email: user.Email}
-	err = userData.StoreRefreshToken(ctx, cfg.RefreshTokenExpiresIn, refreshToken)
+	err = userData.StoreRefreshToken(ctx, s.Cfg.RefreshTokenExpiresIn, token.Refresh)
 
 	if err != nil {
-		return nil, status.Error(codes.Internal, "Failed to store refresh token.")
+		return nil, status.Error(codes.Internal, "failed to store refresh token")
 	}
 
 	return &pb.Response{
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
+		AccessToken:  token.Access,
+		RefreshToken: token.Refresh,
 	}, nil
 }
 
 func (s *Server) SignUp(ctx context.Context, req *pb.Request) (*pb.Response, error) {
-	cfg, err := config.LoadConfig(".")
-
-	if err != nil {
-		return nil, status.Error(codes.Internal, "Failed to load configuration.")
-	}
 
 	hashedPassword := utils.HashPassword(req.Password)
 	user := models.User{Email: req.Email, Password: hashedPassword}
 
 	if _, err := repositories.CreateUser(&user); err != nil {
-		return nil, status.Errorf(codes.Internal, "Failed to create user: %v", err)
+		return nil, status.Errorf(codes.Internal, "failed to create user: %v", err)
 	}
 
-	parseAccessTokenKey, _ := utils.ParsePrivateKey(cfg.AccessTokenPrivateKey)
-	accessToken, err := utils.CreateToken(cfg.AccessTokenExpiresIn, user.ID, parseAccessTokenKey)
-	if err != nil {
+	token, err := utils.CreateTokens(s.Cfg, user.ID)
 
-		return nil, status.Error(codes.Internal, "Failed to create access token.")
-	}
-
-	parseRefreshAccessTokenKey, _ := utils.ParsePrivateKey(cfg.RefreshTokenPrivateKey)
-	refreshToken, err := utils.CreateToken(cfg.RefreshTokenExpiresIn, user.ID, parseRefreshAccessTokenKey)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "Failed to create refresh token.")
+		return nil, status.Error(codes.Internal, fmt.Sprintf("%s", err))
 	}
 
 	userData := &utils.User{ID: user.ID, Email: user.Email}
-	err = userData.StoreRefreshToken(ctx, cfg.RefreshTokenExpiresIn, refreshToken)
+	err = userData.StoreRefreshToken(ctx, s.Cfg.RefreshTokenExpiresIn, token.Refresh)
 
 	if err != nil {
-		return nil, status.Error(codes.Internal, "Failed to store refresh token.")
+		return nil, status.Error(codes.Internal, "failed to store refresh token")
 	}
 
 	return &pb.Response{
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
+		AccessToken:  token.Access,
+		RefreshToken: token.Refresh,
 	}, nil
 }
 
 func (s *Server) ValidateToken(ctx context.Context, req *pb.ValidateTokenRequest) (*pb.ValidateTokenResponse, error) {
-	cfg, err := config.LoadConfig(".")
 
+	rawClaims, err := utils.ValidateToken(req.Token, s.Cfg.AccessTokenPublicKey)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "Failed to load configuration.")
-	}
-	rawClaims, err := utils.ValidateToken(req.Token, cfg.AccessTokenPublicKey)
-	if err != nil {
-		return nil, status.Error(codes.Unauthenticated, "Invalid token")
+		return nil, status.Error(codes.Unauthenticated, "invalid token")
 	}
 
 	claims := rawClaims.(jwt.MapClaims)
@@ -124,38 +101,26 @@ func (s *Server) ValidateToken(ctx context.Context, req *pb.ValidateTokenRequest
 }
 
 func (s *Server) RefreshToken(ctx context.Context, req *pb.RefreshTokenRequest) (*pb.RefreshTokenResponse, error) {
-	cfg, err := config.LoadConfig(".")
+
+	claims, err := utils.ValidateRefreshToken(ctx, s.Cfg, req.RefreshToken)
 
 	if err != nil {
-		return nil, status.Error(codes.Internal, "Failed to load configuration.")
+		return nil, status.Error(codes.Unauthenticated, fmt.Sprintf("%s", err))
 	}
 
-	rawClaims, err := utils.ValidateToken(req.RefreshToken, cfg.RefreshTokenPublicKey)
-
-	if err != nil {
-		return nil, status.Error(codes.Unauthenticated, "Invalid token")
-	}
-
-	err = utils.CheckIfRefreshTokenBlocked(ctx, req.RefreshToken)
-
-	if err != nil {
-		return nil, status.Error(codes.Unauthenticated, "Token is blocked")
-	}
-
-	claims := rawClaims.(jwt.MapClaims)
 	userID := claims["sub"].(string)
 
 	user, err := repositories.GetUserById(ctx, uuid.MustParse(userID))
 
 	if err != nil {
-		return nil, status.Error(codes.Unauthenticated, "Invalid user")
+		return nil, status.Error(codes.Unauthenticated, "invalid user")
 	}
 
-	parseAccessTokenKey, _ := utils.ParsePrivateKey(cfg.AccessTokenPrivateKey)
-	accessToken, err := utils.CreateToken(cfg.AccessTokenExpiresIn, user.ID, parseAccessTokenKey)
+	parseAccessTokenKey, _ := utils.ParsePrivateKey(s.Cfg.AccessTokenPrivateKey)
+	accessToken, err := utils.CreateToken(s.Cfg.AccessTokenExpiresIn, user.ID, parseAccessTokenKey)
 
 	if err != nil {
-		return nil, status.Error(codes.Internal, "Failed to create access token.")
+		return nil, status.Error(codes.Internal, "failed to create access token")
 	}
 
 	return &pb.RefreshTokenResponse{
@@ -167,37 +132,30 @@ func (s *Server) RefreshToken(ctx context.Context, req *pb.RefreshTokenRequest) 
 func (s *Server) SignOut(ctx context.Context, req *pb.DeleteRefreshTokenRequest) (*pb.DeleteRefreshTokenResponse, error) {
 	var pattern string
 
-	cfg, err := config.LoadConfig(".")
+	claims, err := utils.ValidateRefreshToken(ctx, s.Cfg, req.RefreshToken)
 
 	if err != nil {
-		return nil, status.Error(codes.Internal, "Failed to load configuration.")
+		return nil, status.Error(codes.Unauthenticated, fmt.Sprintf("%s", err))
 	}
 
-	rawClaims, err := utils.ValidateToken(req.RefreshToken, cfg.RefreshTokenPublicKey)
-
-	if err != nil {
-		return nil, status.Error(codes.Unauthenticated, "Invalid token")
-	}
-
-	err = utils.CheckIfRefreshTokenBlocked(ctx, req.RefreshToken)
-
-	if err != nil {
-		return nil, status.Error(codes.Unauthenticated, "Token is blocked")
-	}
-
-	claims := rawClaims.(jwt.MapClaims)
 	userID := claims["sub"].(string)
 
 	user, err := repositories.GetUserById(ctx, uuid.MustParse(userID))
 
 	if err != nil {
-		return nil, status.Error(codes.Unauthenticated, "Invalid user")
+		return nil, status.Error(codes.Unauthenticated, "invalid user")
 	}
 
 	if len(req.SessionId) > 0 {
-		pattern = fmt.Sprintf("user:%s:refresh_token:*:sesion_id:%s", user.ID, req.SessionId)
+		pattern = fmt.Sprintf("user:%s:refresh_token:*:session_id:%s", user.ID, req.SessionId)
 	} else {
-		pattern = fmt.Sprintf("user:*:refresh_token:%s:sesion_id:*", req.RefreshToken)
+		pattern = fmt.Sprintf("user:%s:refresh_token:%s:session_id:*", user.ID, req.RefreshToken)
+	}
+
+	err = utils.DeleteKey(ctx, pattern)
+
+	if err != nil {
+		return nil, status.Error(codes.Internal, "failed to sign out")
 	}
 
 	return &pb.DeleteRefreshTokenResponse{}, nil

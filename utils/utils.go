@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"encoding/base64"
 	"fmt"
+	"login/config"
 	"login/db"
 	"time"
 
@@ -16,6 +17,11 @@ import (
 type User struct {
 	ID    uuid.UUID
 	Email string
+}
+
+type Token struct {
+	Access  string
+	Refresh string
 }
 
 func ComparePassword(password, hashedPassword string) error {
@@ -102,7 +108,7 @@ func ValidateToken(token string, publicKey string) (interface{}, error) {
 }
 
 func (u *User) StoreRefreshToken(ctx context.Context, ttl time.Duration, refreshToken string) error {
-	refreshTokenKey := fmt.Sprintf("user:%s:refresh_token:%s", u.ID.String(), refreshToken)
+	refreshTokenKey := fmt.Sprintf("user:%s:refresh_token:%s:session_id:%s", u.ID.String(), refreshToken, uuid.New())
 
 	rdb, err := db.Redis(ctx)
 	if err != nil {
@@ -121,7 +127,7 @@ func (u *User) StoreRefreshToken(ctx context.Context, ttl time.Duration, refresh
 }
 
 func CheckIfRefreshTokenBlocked(ctx context.Context, refreshToken string) error {
-	query := fmt.Sprintf("user:*:refresh_token:%s", refreshToken)
+	query := fmt.Sprintf("user:*:refresh_token:%s:session_id:*", refreshToken)
 
 	rdb, err := db.Redis(ctx)
 	if err != nil {
@@ -140,7 +146,30 @@ func CheckIfRefreshTokenBlocked(ctx context.Context, refreshToken string) error 
 	return nil
 }
 
-func DeleteRedisKey(ctx context.Context) error {
+func CreateTokens(cfg config.Config, userID uuid.UUID) (*Token, error) {
+
+	parseAccessTokenKey, err := ParsePrivateKey(cfg.AccessTokenPrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse access token")
+	}
+	accessToken, err := CreateToken(cfg.AccessTokenExpiresIn, userID, parseAccessTokenKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create access token")
+	}
+
+	parseRefreshAccessTokenKey, err := ParsePrivateKey(cfg.RefreshTokenPrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse refresh token")
+	}
+	refreshToken, err := CreateToken(cfg.RefreshTokenExpiresIn, userID, parseRefreshAccessTokenKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create refresh token")
+	}
+
+	return &Token{Access: accessToken, Refresh: refreshToken}, nil
+}
+
+func DeleteKey(ctx context.Context, pattern string) error {
 	rdb, err := db.Redis(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to connect to Redis: %w", err)
@@ -165,4 +194,21 @@ func DeleteRedisKey(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func ValidateRefreshToken(ctx context.Context, cfg config.Config, refreshToken string) (jwt.MapClaims, error) {
+
+	rawClaims, err := ValidateToken(refreshToken, cfg.RefreshTokenPublicKey)
+
+	if err != nil {
+		return nil, fmt.Errorf("invalid token")
+	}
+
+	err = CheckIfRefreshTokenBlocked(ctx, refreshToken)
+
+	if err != nil {
+		return nil, fmt.Errorf("token is blocked")
+	}
+
+	return rawClaims.(jwt.MapClaims), nil
 }
