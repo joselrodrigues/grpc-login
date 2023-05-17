@@ -212,3 +212,20 @@ func ValidateRefreshToken(ctx context.Context, cfg config.Config, refreshToken s
 
 	return rawClaims.(jwt.MapClaims), nil
 }
+
+func GetUserIdSessions(ctx context.Context, userID uuid.UUID) (int, error) {
+	rdb, err := db.Redis(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("failed to connect to Redis: %w", err)
+	}
+	pattern := fmt.Sprintf("user:%s:refresh_token:*:session_id:*", userID)
+
+	keys, err := rdb.Keys(ctx, pattern).Result()
+	if err != nil {
+		return 0, fmt.Errorf("failed to retrieve keys: %w", err)
+	}
+
+	sessions := len(keys)
+
+	return sessions, nil
+}

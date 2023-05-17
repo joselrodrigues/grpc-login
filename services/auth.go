@@ -32,6 +32,16 @@ func (s *Server) SignIn(ctx context.Context, req *pb.Request) (*pb.Response, err
 		return nil, status.Error(codes.PermissionDenied, "invalid username or password")
 	}
 
+	numSessions, err := utils.GetUserIdSessions(ctx, user.ID)
+
+	if err != nil {
+		return nil, status.Error(codes.Internal, "failed to check user sessions")
+	}
+
+	if numSessions > s.Cfg.MaxNumSessions {
+		return nil, status.Error(codes.ResourceExhausted, "maximum number of sessions exceeded")
+	}
+
 	token, err := utils.CreateTokens(s.Cfg, user.ID)
 
 	if err != nil {
