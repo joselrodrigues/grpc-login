@@ -155,3 +155,6 @@ go.work
 # RSA files and base64
 *.base64
 *.pem
+
+# Temporal files
+tmp

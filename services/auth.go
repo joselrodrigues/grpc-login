@@ -32,13 +32,13 @@ func (s *Server) SignIn(ctx context.Context, req *pb.Request) (*pb.Response, err
 		return nil, status.Error(codes.PermissionDenied, "invalid username or password")
 	}
 
-	numSessions, err := utils.GetUserIdSessions(ctx, user.ID)
+	sessions, err := utils.GetSessionsByUserID(ctx, user.ID)
 
 	if err != nil {
 		return nil, status.Error(codes.Internal, "failed to check user sessions")
 	}
 
-	if numSessions > s.Cfg.MaxNumSessions {
+	if len(sessions) >= s.Cfg.MaxNumSessions {
 		return nil, status.Error(codes.ResourceExhausted, "maximum number of sessions exceeded")
 	}
 
@@ -50,6 +50,7 @@ func (s *Server) SignIn(ctx context.Context, req *pb.Request) (*pb.Response, err
 
 	userData := &utils.User{ID: user.ID, Email: user.Email}
 	err = userData.StoreRefreshToken(ctx, s.Cfg.RefreshTokenExpiresIn, token.Refresh)
+	utils.GetSessionDataByUserID(ctx, user.ID, token.Refresh)
 
 	if err != nil {
 		return nil, status.Error(codes.Internal, "failed to store refresh token")

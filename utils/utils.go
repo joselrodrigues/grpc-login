@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rsa"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"login/config"
 	"login/db"
@@ -12,6 +13,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
+	"google.golang.org/grpc/metadata"
 )
 
 type User struct {
@@ -22,6 +24,20 @@ type User struct {
 type Token struct {
 	Access  string
 	Refresh string
+}
+
+type SessionData struct {
+	RefreshToken   string    `json:"refresh_token"`
+	SessionID      uuid.UUID `json:"session_id"`
+	UserID         string    `json:"user_id"`
+	LoginTimestamp int64     `json:"login_timestamp"`
+	UserAgent      string    `json:"user_agent"`
+}
+
+type filterSession struct {
+	SessionID      uuid.UUID `json:"session_id"`
+	LoginTimestamp int64     `json:"login_timestamp"`
+	UserAgent      string    `json:"user_agent"`
 }
 
 func ComparePassword(password, hashedPassword string) error {
@@ -108,16 +124,42 @@ func ValidateToken(token string, publicKey string) (interface{}, error) {
 }
 
 func (u *User) StoreRefreshToken(ctx context.Context, ttl time.Duration, refreshToken string) error {
-	refreshTokenKey := fmt.Sprintf("user:%s:refresh_token:%s:session_id:%s", u.ID.String(), refreshToken, uuid.New())
+	sessionID := uuid.New()
+	refreshTokenKey := fmt.Sprintf("user:%s:refresh_token:%s:session_id:%s", u.ID.String(), refreshToken, sessionID)
 
 	rdb, err := db.Redis(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to connect to Redis: %w", err)
 	}
 
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return fmt.Errorf("failed to retrieve metadata from context")
+	}
+
+	userAgent, ok := md["user-device"]
+
+	if !ok {
+		return fmt.Errorf("failed to retrieve user-agent from metadata")
+	}
+
+	if len(userAgent) == 0 {
+		return fmt.Errorf("invalid user-agent")
+	}
+
+	now := time.Now().UTC()
+
+	dataSession := &SessionData{UserID: u.ID.String(), RefreshToken: refreshToken, SessionID: sessionID, UserAgent: userAgent[0], LoginTimestamp: now.Unix()}
+
+	dataSessionJson, err := json.Marshal(dataSession)
+
+	if err != nil {
+		return fmt.Errorf("failed to store session data")
+	}
+
 	pipe := rdb.TxPipeline()
 
-	pipe.Set(ctx, refreshTokenKey, refreshToken, ttl)
+	pipe.Set(ctx, refreshTokenKey, dataSessionJson, ttl)
 
 	if _, err := pipe.Exec(ctx); err != nil {
 		return fmt.Errorf("failed to store refresh token: %w", err)
@@ -133,7 +175,7 @@ func CheckIfRefreshTokenBlocked(ctx context.Context, refreshToken string) error 
 	if err != nil {
 		return fmt.Errorf("failed to connect to Redis: %w", err)
 	}
-
+	//TODO change KEYS is not performant
 	keys, err := rdb.Keys(ctx, query).Result()
 	if err != nil {
 		return err
@@ -174,7 +216,7 @@ func DeleteKey(ctx context.Context, pattern string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to Redis: %w", err)
 	}
-
+	//TODO change KEYS is not performant
 	keys, err := rdb.Keys(ctx, pattern).Result()
 	if err != nil {
 		return fmt.Errorf("failed to retrieve keys: %w", err)
@@ -213,19 +255,64 @@ func ValidateRefreshToken(ctx context.Context, cfg config.Config, refreshToken s
 	return rawClaims.(jwt.MapClaims), nil
 }
 
-func GetUserIdSessions(ctx context.Context, userID uuid.UUID) (int, error) {
+func GetSessionsByUserID(ctx context.Context, userID uuid.UUID) ([]string, error) {
 	rdb, err := db.Redis(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("failed to connect to Redis: %w", err)
+		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
 	}
+
+	var keys []string
+	var cursor uint64
 	pattern := fmt.Sprintf("user:%s:refresh_token:*:session_id:*", userID)
 
-	keys, err := rdb.Keys(ctx, pattern).Result()
-	if err != nil {
-		return 0, fmt.Errorf("failed to retrieve keys: %w", err)
+	for {
+		var batch []string
+		batch, cursor, err = rdb.Scan(ctx, cursor, pattern, 10).Result()
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan keys: %w", err)
+		}
+		keys = append(keys, batch...)
+		if cursor == 0 {
+			break
+		}
 	}
 
-	sessions := len(keys)
+	return keys, nil
+}
 
+func GetSessionDataByUserID(ctx context.Context, userID uuid.UUID, refreshToken string) ([]filterSession, error) {
+	rdb, err := db.Redis(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
+	}
+
+	keys, err := GetSessionsByUserID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("%w", err)
+	}
+
+	var session SessionData
+	var sessions []filterSession
+
+	for _, key := range keys {
+		sessionData, err := rdb.Get(ctx, key).Result()
+		if err != nil {
+			return nil, fmt.Errorf("error getting session data from Redis")
+		}
+
+		err = json.Unmarshal([]byte(sessionData), &session)
+
+		if err != nil {
+			return nil, fmt.Errorf("error deserializing session data")
+		}
+		if refreshToken != session.RefreshToken {
+			sessions = append(sessions, filterSession{
+				SessionID:      session.SessionID,
+				LoginTimestamp: session.LoginTimestamp,
+				UserAgent:      session.UserAgent,
+			})
+		}
+
+	}
 	return sessions, nil
 }
