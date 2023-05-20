@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"login/config"
 	"login/db"
+	pb "login/protos"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -27,11 +28,11 @@ type Token struct {
 }
 
 type SessionData struct {
-	RefreshToken   string    `json:"refresh_token"`
-	SessionID      uuid.UUID `json:"session_id"`
-	UserID         string    `json:"user_id"`
-	LoginTimestamp int64     `json:"login_timestamp"`
-	UserAgent      string    `json:"user_agent"`
+	RefreshToken   string `json:"refresh_token"`
+	SessionID      string `json:"session_id"`
+	UserID         string `json:"user_id"`
+	LoginTimestamp int64  `json:"login_timestamp"`
+	UserAgent      string `json:"user_agent"`
 }
 
 type filterSession struct {
@@ -149,7 +150,7 @@ func (u *User) StoreRefreshToken(ctx context.Context, ttl time.Duration, refresh
 
 	now := time.Now().UTC()
 
-	dataSession := &SessionData{UserID: u.ID.String(), RefreshToken: refreshToken, SessionID: sessionID, UserAgent: userAgent[0], LoginTimestamp: now.Unix()}
+	dataSession := &SessionData{UserID: u.ID.String(), RefreshToken: refreshToken, SessionID: sessionID.String(), UserAgent: userAgent[0], LoginTimestamp: now.Unix()}
 
 	dataSessionJson, err := json.Marshal(dataSession)
 
@@ -175,10 +176,19 @@ func CheckIfRefreshTokenBlocked(ctx context.Context, refreshToken string) error 
 	if err != nil {
 		return fmt.Errorf("failed to connect to Redis: %w", err)
 	}
-	//TODO change KEYS is not performant
-	keys, err := rdb.Keys(ctx, query).Result()
-	if err != nil {
-		return err
+
+	var cursor uint64
+	var keys []string
+	for {
+		var batch []string
+		batch, cursor, err = rdb.Scan(ctx, cursor, query, 10).Result()
+		if err != nil {
+			return fmt.Errorf("failed to scan keys: %w", err)
+		}
+		keys = append(keys, batch...)
+		if cursor == 0 {
+			break
+		}
 	}
 
 	if len(keys) == 0 {
@@ -216,10 +226,19 @@ func DeleteKey(ctx context.Context, pattern string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to Redis: %w", err)
 	}
-	//TODO change KEYS is not performant
-	keys, err := rdb.Keys(ctx, pattern).Result()
-	if err != nil {
-		return fmt.Errorf("failed to retrieve keys: %w", err)
+
+	var cursor uint64
+	var keys []string
+	for {
+		var batch []string
+		batch, cursor, err = rdb.Scan(ctx, cursor, pattern, 10).Result()
+		if err != nil {
+			return fmt.Errorf("failed to scan keys: %w", err)
+		}
+		keys = append(keys, batch...)
+		if cursor == 0 {
+			break
+		}
 	}
 
 	if len(keys) == 0 {
@@ -280,7 +299,7 @@ func GetSessionsByUserID(ctx context.Context, userID uuid.UUID) ([]string, error
 	return keys, nil
 }
 
-func GetSessionDataByUserID(ctx context.Context, userID uuid.UUID, refreshToken string) ([]filterSession, error) {
+func GetSessionsDataByUserID(ctx context.Context, userID uuid.UUID, refreshToken string) ([]*pb.SessionData, error) {
 	rdb, err := db.Redis(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
@@ -292,7 +311,7 @@ func GetSessionDataByUserID(ctx context.Context, userID uuid.UUID, refreshToken 
 	}
 
 	var session SessionData
-	var sessions []filterSession
+	var sessions []*pb.SessionData
 
 	for _, key := range keys {
 		sessionData, err := rdb.Get(ctx, key).Result()
@@ -305,14 +324,16 @@ func GetSessionDataByUserID(ctx context.Context, userID uuid.UUID, refreshToken 
 		if err != nil {
 			return nil, fmt.Errorf("error deserializing session data")
 		}
+
 		if refreshToken != session.RefreshToken {
-			sessions = append(sessions, filterSession{
-				SessionID:      session.SessionID,
+			sessions = append(sessions, &pb.SessionData{
+				SessionId:      session.SessionID,
 				LoginTimestamp: session.LoginTimestamp,
 				UserAgent:      session.UserAgent,
 			})
 		}
 
 	}
+
 	return sessions, nil
 }

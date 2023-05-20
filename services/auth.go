@@ -50,7 +50,6 @@ func (s *Server) SignIn(ctx context.Context, req *pb.Request) (*pb.Response, err
 
 	userData := &utils.User{ID: user.ID, Email: user.Email}
 	err = userData.StoreRefreshToken(ctx, s.Cfg.RefreshTokenExpiresIn, token.Refresh)
-	utils.GetSessionDataByUserID(ctx, user.ID, token.Refresh)
 
 	if err != nil {
 		return nil, status.Error(codes.Internal, "failed to store refresh token")
@@ -170,4 +169,34 @@ func (s *Server) SignOut(ctx context.Context, req *pb.DeleteRefreshTokenRequest)
 	}
 
 	return &pb.DeleteRefreshTokenResponse{}, nil
+}
+
+func (s *Server) Sessions(ctx context.Context, req *pb.SessionRequest) (*pb.SessionResponse, error) {
+
+	rawClaims, err := utils.ValidateToken(req.AccessToken, s.Cfg.AccessTokenPublicKey)
+	if err != nil {
+		return nil, status.Error(codes.Unauthenticated, "invalid token")
+	}
+
+	claims, ok := rawClaims.(jwt.MapClaims)
+	if !ok {
+		return nil, status.Error(codes.Internal, "invalid claims format")
+	}
+
+	sub, ok := claims["sub"].(string)
+	if !ok {
+		return nil, status.Error(codes.Internal, "invalid subject format")
+	}
+
+	userID, err := uuid.Parse(sub)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "failed to parse the user")
+	}
+
+	sessionsData, err := utils.GetSessionsDataByUserID(ctx, userID, req.RefreshToken)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "failed to get sessions data")
+	}
+
+	return &pb.SessionResponse{SessionsData: sessionsData}, nil
 }
