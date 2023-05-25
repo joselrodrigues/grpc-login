@@ -327,7 +327,7 @@ func GetSessionsDataByUserID(ctx context.Context, userID uuid.UUID, refreshToken
 
 		if refreshToken != session.RefreshToken {
 			sessions = append(sessions, &pb.SessionData{
-				SessionId:      session.SessionID,
+				Id:             session.SessionID,
 				LoginTimestamp: session.LoginTimestamp,
 				UserAgent:      session.UserAgent,
 			})
