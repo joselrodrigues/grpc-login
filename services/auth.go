@@ -198,5 +198,5 @@ func (s *Server) Sessions(ctx context.Context, req *pb.SessionRequest) (*pb.Sess
 		return nil, status.Error(codes.Internal, "failed to get sessions data")
 	}
 
-	return &pb.SessionResponse{SessionsData: sessionsData}, nil
+	return &pb.SessionResponse{Sessions: sessionsData}, nil
 }
