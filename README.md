@@ -46,36 +46,41 @@ Start the server
 
 To run this project, you will need to add the following environment variables to your .env file
 
-`ACCESS_TOKEN_PRIVATE_KEY={base64}`
+```
+ ACCESS_TOKEN_PRIVATE_KEY={base64 PEM}
+ ACCESS_TOKEN_PUBLIC_KEY={base64 PEM}
+ REFRESH_TOKEN_PRIVATE_KEY={base64 PEM}
+ REFRESH_TOKEN_PUBLIC_KEY={base64 PEM}
+ ACCESS_TOKEN_EXPIRED_IN=15m
+ ACCESS_TOKEN_MAXAGE=15
+ REFRESH_TOKEN_EXPIRED_IN=60m
+ REFRESH_TOKEN_MAXAGE=60
+ POSTGRES_USER=postgres
+ POSTGRES_PASSWORD=docker
+ POSTGRES_PORT=5432
+ POSTGRES_DB=postgres
+ POSTGRES_HOST=localhost
+ REDIS_HOST=localhost:6379
+ REDIS_PASSWORD=SUPER_SECRET_PASSWORD
+ REDIS_DB=0
+ MAX_NUM_SESSIONS=5
+ ```
 
-`ACCESS_TOKEN_PUBLIC_KEY={base64}`
+## Usefull commands 
 
-`REFRESH_TOKEN_PRIVATE_KEY={base64}`
+Add submodule
+```
+git submodule add git@github.com:joselrodrigues/shared-proto.git ./protos
 
-`REFRESH_TOKEN_PUBLIC_KEY={base64}`
+```
+Create private PEM file
 
-`ACCESS_TOKEN_EXPIRED_IN=15m`
+```
+openssl genpkey -algorithm RSA -out refresh_token_private.pem -pkeyopt rsa_keygen_bits:2048
+```
 
-`ACCESS_TOKEN_MAXAGE=15`
+Create public PEM file
 
-`REFRESH_TOKEN_EXPIRED_IN=60m`
-
-`REFRESH_TOKEN_MAXAGE=60`
-
-`POSTGRES_USER=postgres`
-
-`POSTGRES_PASSWORD=docker`
-
-`POSTGRES_PORT=5432`
-
-`POSTGRES_DB=postgres`
-
-`POSTGRES_HOST=localhost`
-
-`REDIS_HOST=localhost:6379`
-
-`REDIS_PASSWORD=SUPER_SECRET_PASSWORD`
-
-`REDIS_DB=0`
-
-`MAX_NUM_SESSIONS=5`
+```
+openssl rsa -pubout -in refresh_private_key.pem -out refresh_public_key.pem
+```
